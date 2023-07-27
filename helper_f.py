@@ -7,8 +7,9 @@ import math
 import time
 import tf
 #import compressed image type and openCV
-from sensor_msgs.msg import CompressedImage 
+from sensor_msgs.msg import CompressedImage, Image
 import cv2
+from cv_bridge import CvBridge, CvBridgeError
 
 
 class GetZOrientation:
@@ -19,8 +20,11 @@ class GetZOrientation:
         self.initial_u = 0
         self.odom_sub = rospy.Subscriber("/odometry/filtered", Odometry, self.callback, queue_size=1)
         self.camera_sub = rospy.Subscriber("/camera/color/image_raw/compressed", CompressedImage, self.image_callback, queue_size=1)
+        self.depth_image_sub = rospy.Subscriber("/camera/aligned_depth_to_color/image_raw",Image,self.callback_depth)
         self.last_image = None
         self.circle_location = None
+        self.depth_image = None
+        self.bridge = CvBridge()
         
     
     def callback(self, data):
@@ -29,6 +33,23 @@ class GetZOrientation:
         self.current_yaw = euler[2]
         #print degrees
         print("degrees: ",math.degrees(self.current_yaw))
+
+    def callback_depth(self,data):
+        try:
+            cv_image = self.bridge.imgmsg_to_cv2(data, "passthrough")
+        except CvBridgeError as e:
+            print(e)
+            #check if cv_image has three dimensions
+        if len(cv_image.shape) == 3:
+            (rows, cols, channels) = cv_image.shape
+        else:
+            (rows,cols) = cv_image.shape
+
+        cv_image = np.array(cv_image, dtype=np.float32)
+        #change all of the zero values to nan
+        cv_image[np.where(cv_image == 0)] = np.nan
+        self.depth_image = cv_image
+
 
     def find_blue_circle(self):
         camera_image = self.last_image
@@ -61,6 +82,18 @@ class GetZOrientation:
             cy = int(M['m01']/M['m00'])
             #draw a circle at the center of the largest contour
             cv2.circle(camera_image, (cx,cy), 5, (0,0,255), -1)
+            #print depth at the center of the largest contour
+            if self.depth_image is not None:
+                #calculate the depth at the center of the circle by getting the meean of the depth values on the largest contour
+                #get the x,y coordinates of the largest contour
+                x,y,w,h = cv2.boundingRect(largest_contour)
+                #get the depth values on the largest contour
+                depth_values = self.depth_image[y:y+h, x:x+w]
+                #get the mean of the depth values nanmean ignores nan values
+                mean_depth = np.nanmean(depth_values)/1000.0
+                print("depth at center of circle: ", mean_depth)
+                #also put a text on top of the image with the depth
+                cv2.putText(camera_image, str(mean_depth), (20,20), cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255), 2)
             #draw a circle around the largest contour
             x,y,w,h = cv2.boundingRect(largest_contour)
             cv2.rectangle(camera_image, (x,y), (x+w,y+h), (0,255,0), 2)
@@ -96,7 +129,7 @@ class GetZOrientation:
         #convert image to cv2 image
         np_arr = np.fromstring(data.data, np.uint8)
         self.last_image = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-        cv2.imshow("image", self.last_image)
+        # cv2.imshow("image", self.last_image)
         if cv2.waitKey(5) == ord('a'):
             #if 'a' is pressed, print the current yaw
             print("A PRESSED")
