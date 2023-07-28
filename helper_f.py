@@ -8,6 +8,7 @@ import time
 import tf
 # import compressed image type and openCV
 from sensor_msgs.msg import CompressedImage, Image
+from tf2_msgs.msg import TFMessage
 import cv2
 from cv_bridge import CvBridge, CvBridgeError
 
@@ -20,14 +21,18 @@ class GetZOrientation:
         self.current_depth = None
         self.initial_yaw = 0
         self.initial_u = 0
+        self.initial_v = 0
         self.initial_position = np.array([0, 0])
         self.initial_depth = 0.
+        self.initial_rot_matrix = np.array([[0, 0, 0], [0, 0, 0], [0, 0, 0]])
         self.odom_sub = rospy.Subscriber(
             "/odometry/filtered", Odometry, self.callback, queue_size=1)
         self.camera_sub = rospy.Subscriber(
             "/camera/color/image_raw/compressed", CompressedImage, self.image_callback, queue_size=1)
         self.depth_image_sub = rospy.Subscriber(
             "/camera/aligned_depth_to_color/image_raw", Image, self.callback_depth)
+        self.tf_sub = rospy.Subscriber(
+            "/tf", TFMessage, self.callback_tf, queue_size=1)
         self.last_image = None
         self.circle_location = None
         self.depth_image = None
@@ -43,7 +48,7 @@ class GetZOrientation:
             [data.pose.pose.position.x, data.pose.pose.position.y])
 
         # print degrees
-        print("degrees: ", math.degrees(self.current_yaw))
+        # print("degrees: ", math.degrees(self.current_yaw))
 
     def callback_depth(self, data):
         try:
@@ -60,6 +65,16 @@ class GetZOrientation:
         # change all of the zero values to nan
         cv_image[np.where(cv_image == 0)] = np.nan
         self.depth_image = cv_image
+
+    def callback_tf(self, data):
+        # I want to have the rotation between base_link and odom
+        if data.transforms[0].header.frame_id == 'odom' and data.transforms[0].child_frame_id == 'base_link':
+            quaternion = (data.transforms[0].transform.rotation.x, data.transforms[0].transform.rotation.y,
+                          data.transforms[0].transform.rotation.z, data.transforms[0].transform.rotation.w)
+            # convert  quaternion to rotation matrix and take the only the rotation part
+            self.rot_matrix = tf.transformations.quaternion_matrix(quaternion)
+            self.rot_matrix = self.rot_matrix[:3, :3]
+            # print('rotation matrix:', self.rot_matrix)
 
     def find_blue_circle(self):
         camera_image = self.last_image
@@ -160,8 +175,10 @@ class GetZOrientation:
             print("current yaw: ", math.degrees(get_z_orientation.current_yaw))
             self.initial_yaw = self.current_yaw
             self.initial_u = self.circle_location[0]
+            self.initial_v = self.circle_location[1]
             self.initial_depth = self.current_depth
             self.initial_position = self.current_position
+            self.initial_rot_matrix = self.rot_matrix
         # shutdown ros if 'q' is pressed on the keyboard
         # if cv2.waitKey(5) == ord('q'):
         #     print("q is pressed")
@@ -175,11 +192,19 @@ class GetZOrientation:
         # print ("                        estimated linear u2: ",self.estimate_rot_linear_u2((self.current_yaw-self.initial_yaw), self.initial_u, 470.0))
 
         # using the inital position which is (x,y) and the current position which is (x',y') calculate the distance between the two points
-        distance = np.linalg.norm(self.current_position-self.initial_position)
+        # distance = np.linalg.norm(self.current_position-self.initial_position)
+        robot_movement = self.current_position-self.initial_position
+        robot_movement_3x1 = np.array([robot_movement[0], robot_movement[1], 0])
+        translation_b1 = np.matmul(self.initial_rot_matrix, robot_movement_3x1)
         # print("estimated u2 with translational move", self.estimate_trans_u2(self.initial_depth, distance, self.initial_u, 250.0))
-        superpos_estimate = (self.estimate_rot_u2((self.current_yaw-self.initial_yaw), self.initial_u, 470.0) -
-                             self.initial_u) + self.estimate_trans_u2(self.initial_depth, distance, self.initial_u, 250.0)
-        print("                    superpos_estimate: ", superpos_estimate)
+        superpos_estimate_u = (self.estimate_rot_u2((self.current_yaw-self.initial_yaw), self.initial_u, 470.0) -
+                             self.initial_u) + self.estimate_trans_u2(self.initial_depth, translation_b1[0], self.initial_u, 250.0)
+        superpos_estimate_v = self.estimate_trans_u2(self.initial_depth, translation_b1[2], self.initial_v, 250.0)
+        #print estimated u and v
+        print("estimated u: ", superpos_estimate_u , "estimated v: ", superpos_estimate_v)
+        # print("translation wrt B1: ", translation_b1)
+        
+        
 
 
 if __name__ == '__main__':
@@ -187,3 +212,4 @@ if __name__ == '__main__':
     print("KIIER")
     get_z_orientation = GetZOrientation()
     rospy.spin()
+
