@@ -11,10 +11,68 @@ from sensor_msgs.msg import CompressedImage, Image
 from tf2_msgs.msg import TFMessage
 import cv2
 from cv_bridge import CvBridge, CvBridgeError
+import sys
 
+#define a struct for the three f values, F_U_ROT, F_U_TRANS, F_V, a set of values for simulation and a set of values for real life and initialize them to 0 
+# and generate getter function with the argument is_sim
+
+class F_values:
+    F_U_ROT = 470.0
+    F_U_TRANS = 230.0
+    F_V = 600.0
+    F_U_ROT_SIM = 470.0
+    F_U_TRANS_SIM = 510.0
+    F_V_SIM = 730.0
+    def get_u_rot(is_sim):
+        if is_sim:
+            return F_values.F_U_ROT_SIM
+        else:
+            return F_values.F_U_ROT
+    def get_u_trans(is_sim):
+        if is_sim:
+            return F_values.F_U_TRANS_SIM
+        else:
+            return F_values.F_U_TRANS
+    def get_v(is_sim):
+        if is_sim:
+            return F_values.F_V_SIM
+        else:
+            return F_values.F_V
+    def decrease_u_rot(is_sim):
+        if is_sim:
+            F_values.F_U_ROT_SIM -= 10
+        else:
+            F_values.F_U_ROT -= 10
+    def increase_u_rot(is_sim):
+        if is_sim:
+            F_values.F_U_ROT_SIM += 10
+        else:
+            F_values.F_U_ROT += 10
+    def decrease_u_trans(is_sim):
+        if is_sim:
+            F_values.F_U_TRANS_SIM -= 10
+        else:
+            F_values.F_U_TRANS -= 10
+    def increase_u_trans(is_sim):
+        if is_sim:
+            F_values.F_U_TRANS_SIM += 10
+        else:
+            F_values.F_U_TRANS += 10
+    def decrease_v(is_sim):
+        if is_sim:
+            F_values.F_V_SIM -= 10
+        else:
+            F_values.F_V -= 10
+
+    def increase_v(is_sim):
+        if is_sim:
+            F_values.F_V_SIM += 10
+        else:
+            F_values.F_V += 10
 
 class GetZOrientation:
-    def __init__(self):
+    def __init__(self, is_sim = False):
+        self.is_sim = is_sim
         # current_yaw is in radians
         self.current_yaw = 0
         self.current_position = None
@@ -25,12 +83,14 @@ class GetZOrientation:
         self.initial_position = np.array([0, 0])
         self.initial_depth = 0.
         self.initial_rot_matrix = np.array([[0, 0, 0], [0, 0, 0], [0, 0, 0]])
+        self.last_u_estimate = 0
+        self.last_v_estimate = 0
         self.odom_sub = rospy.Subscriber(
             "/odometry/filtered", Odometry, self.callback, queue_size=1)
         self.camera_sub = rospy.Subscriber(
             "/camera/color/image_raw/compressed", CompressedImage, self.image_callback, queue_size=1)
         self.depth_image_sub = rospy.Subscriber(
-            "/camera/aligned_depth_to_color/image_raw", Image, self.callback_depth)
+            "/camera/aligned_depth_to_color/image_raw",Image, self.callback_depth)
         self.tf_sub = rospy.Subscriber(
             "/tf", TFMessage, self.callback_tf, queue_size=1)
         self.last_image = None
@@ -83,6 +143,9 @@ class GetZOrientation:
         # define range of blue color in HSV
         lower_blue = np.array([110, 50, 50])
         upper_blue = np.array([130, 255, 255])
+        #define the same range for the color vibrant orange
+        lower_orange = np.array([0, 150, 50])
+        upper_orange = np.array([10, 255, 255])
         # threshold the HSV image to get only blue colors
         mask = cv2.inRange(hsv_image, lower_blue, upper_blue)
         # bitwise-AND mask and original image
@@ -122,17 +185,26 @@ class GetZOrientation:
                             cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
             # draw a circle around the largest contour
             x, y, w, h = cv2.boundingRect(largest_contour)
+            #print x,y,w,h with space as delimiter erach with 2 decimal points and it's name as a string
+            # print("x: ", x, "y: ", y, "w: ", w, "h: ", h)
             cv2.rectangle(camera_image, (x, y), (x+w, y+h), (0, 255, 0), 2)
+            #draw a rectangle iwth last_u_estimate and last_v_estimate if the two are not nan, these two values are with respect to the center of the image so add the center of the image to them
+            if not math.isnan(self.last_u_estimate) and not math.isnan(self.last_v_estimate):
+                cv2.rectangle(camera_image, (int(self.last_u_estimate+camera_image.shape[1]/2-w/2), int(self.last_v_estimate+camera_image.shape[0]/2-h/2)), (int(self.last_u_estimate+camera_image.shape[1]/2+w/2), int(self.last_v_estimate+camera_image.shape[0]/2+h/2)), (0, 0, 255), 2)
+            
             # draw a line from the center of the image to the center of the largest contour
-            cv2.line(camera_image, (320, 240), (cx, cy), (255, 0, 0), 2)
+            #define the center of the image as varialles derived from the image size
+            center_x = int(camera_image.shape[1]/2)
+            center_y = int(camera_image.shape[0]/2)
+            cv2.line(camera_image, (center_x, center_y), (cx, cy), (255, 0, 0), 2)
             # write the distance from the center of the image to the center of the largest contour on the image
-            cv2.putText(camera_image, str(cx-320)+","+str(cy-240),
+            cv2.putText(camera_image, str(cx-center_x)+","+str(cy-center_y),
                         (cx, cy), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
             # show the image
             cv2.imshow("image", camera_image)
             cv2.waitKey(1)
             # return the x,y coordinates of the center of the largest contour with respect to the center of the image
-            return cx-320, cy-240
+            return cx-center_x, cy-center_y
         else:
             return None
 
@@ -179,6 +251,34 @@ class GetZOrientation:
             self.initial_depth = self.current_depth
             self.initial_position = self.current_position
             self.initial_rot_matrix = self.rot_matrix
+
+        #if down arrow is pressed, decrease the f_u_rot by 10
+        pressed_key = cv2.waitKey(5)
+        if pressed_key == ord('s'):
+            print("S PRESSED")
+            F_values.decrease_v(self.is_sim)
+            print("f_v: ", F_values.get_v(self.is_sim))
+        #if up arrow is pressed, increase the f_u_rot by 10
+        if pressed_key == ord('w'):
+            print("W PRESSED")
+            F_values.increase_v(self.is_sim)
+            print("f_v: ", F_values.get_v(self.is_sim))
+
+        if pressed_key == ord('d'):
+            print("D PRESSED")
+            F_values.increase_u_trans(self.is_sim)
+            print("f_u_trans: ", F_values.get_u_trans(self.is_sim))
+        #if up arrow is pressed, increase the f_u_trans by 10
+        if pressed_key == ord('e'):
+            print("E PRESSED")
+            F_values.increase_u_trans(self.is_sim)
+            print("f_u_trans: ", F_values.get_u_trans(self.is_sim))
+
+        #if p is pressed, print the current estimated u and v
+        if pressed_key == ord('p'):
+            print("P PRESSED")
+            print("estimated u: ", self.last_u_estimate, "estimated v: ", self.last_v_estimate)
+
         # shutdown ros if 'q' is pressed on the keyboard
         # if cv2.waitKey(5) == ord('q'):
         #     print("q is pressed")
@@ -197,19 +297,38 @@ class GetZOrientation:
         robot_movement_3x1 = np.array([robot_movement[0], robot_movement[1], 0])
         translation_b1 = np.matmul(self.initial_rot_matrix, robot_movement_3x1)
         # print("estimated u2 with translational move", self.estimate_trans_u2(self.initial_depth, distance, self.initial_u, 250.0))
-        superpos_estimate_u = (self.estimate_rot_u2((self.current_yaw-self.initial_yaw), self.initial_u, 470.0) -
-                             self.initial_u) + self.estimate_trans_u2(self.initial_depth, translation_b1[0], self.initial_u, 250.0)
-        superpos_estimate_v = self.estimate_trans_u2(self.initial_depth, translation_b1[2], self.initial_v, 250.0)
+        superpos_estimate_u = (self.estimate_rot_u2((self.current_yaw-self.initial_yaw), self.initial_u, F_values.get_u_rot(self.is_sim)) -
+                             self.initial_u) + self.estimate_trans_u2(self.initial_depth, translation_b1[0], self.initial_u, F_values.get_u_trans(self.is_sim))
+        
+        # superpos_estimate_u = self.estimate_rot_u2((self.current_yaw-self.initial_yaw), self.initial_u, self.f_u_rot)
+        superpos_estimate_v = self.estimate_trans_u2(self.initial_depth, translation_b1[1], self.initial_v, F_values.get_v(self.is_sim))
+
+        self.last_u_estimate = superpos_estimate_u
+        self.last_v_estimate = superpos_estimate_v
+
+ 
+        
         #print estimated u and v
-        print("estimated u: ", superpos_estimate_u , "estimated v: ", superpos_estimate_v)
+        # print("estimated u: ", superpos_estimate_u , "estimated v: ", superpos_estimate_v)
         # print("translation wrt B1: ", translation_b1)
         
         
 
 
 if __name__ == '__main__':
+    #get the argument is_sim from the command line and put it in the variable is_sim if there is no argument given in the command line, set is_sim to False
+    is_sim = False
+    if len(sys.argv) > 1:
+        #parse the arguments with argparse.ArgumentParser()
+        import argparse
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--is_sim', action='store_true')
+        args = parser.parse_args()
+        is_sim = args.is_sim
+    print("is_sim: ", is_sim)
+    
     rospy.init_node('get_z_orientation', anonymous=True)
     print("KIIER")
-    get_z_orientation = GetZOrientation()
+    get_z_orientation = GetZOrientation(is_sim = is_sim)
     rospy.spin()
 
