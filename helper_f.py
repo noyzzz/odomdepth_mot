@@ -17,58 +17,58 @@ import sys
 # and generate getter function with the argument is_sim
 
 class F_values:
-    F_U_ROT = 470.0
-    F_U_TRANS = 230.0
-    F_V = 600.0
-    F_U_ROT_SIM = 470.0
-    F_U_TRANS_SIM = 510.0
-    F_V_SIM = 730.0
+    __F_U_ROT = 656.24609375
+    __F_U_TRANS = 656.0
+    __F_V = 656.0
+    __F_U_ROT_SIM = 462.1379699707031
+    __F_U_TRANS_SIM = 510.0
+    __F_V_SIM = 100.0
     def get_u_rot(is_sim):
         if is_sim:
-            return F_values.F_U_ROT_SIM
+            return F_values.__F_U_ROT_SIM
         else:
-            return F_values.F_U_ROT
+            return F_values.__F_U_ROT
     def get_u_trans(is_sim):
         if is_sim:
-            return F_values.F_U_TRANS_SIM
+            return F_values.__F_U_TRANS_SIM
         else:
-            return F_values.F_U_TRANS
+            return F_values.__F_U_TRANS
     def get_v(is_sim):
         if is_sim:
-            return F_values.F_V_SIM
+            return F_values.__F_V_SIM
         else:
-            return F_values.F_V
+            return F_values.__F_V
     def decrease_u_rot(is_sim):
         if is_sim:
-            F_values.F_U_ROT_SIM -= 10
+            F_values.__F_U_ROT_SIM -= 10
         else:
-            F_values.F_U_ROT -= 10
+            F_values.__F_U_ROT -= 10
     def increase_u_rot(is_sim):
         if is_sim:
-            F_values.F_U_ROT_SIM += 10
+            F_values.__F_U_ROT_SIM += 10
         else:
-            F_values.F_U_ROT += 10
+            F_values.__F_U_ROT += 10
     def decrease_u_trans(is_sim):
         if is_sim:
-            F_values.F_U_TRANS_SIM -= 10
+            F_values.__F_U_TRANS_SIM -= 10
         else:
-            F_values.F_U_TRANS -= 10
+            F_values.__F_U_TRANS -= 10
     def increase_u_trans(is_sim):
         if is_sim:
-            F_values.F_U_TRANS_SIM += 10
+            F_values.__F_U_TRANS_SIM += 10
         else:
-            F_values.F_U_TRANS += 10
+            F_values.__F_U_TRANS += 10
     def decrease_v(is_sim):
         if is_sim:
-            F_values.F_V_SIM -= 10
+            F_values.__F_V_SIM -= 10
         else:
-            F_values.F_V -= 10
+            F_values.__F_V -= 10
 
     def increase_v(is_sim):
         if is_sim:
-            F_values.F_V_SIM += 10
+            F_values.__F_V_SIM += 10
         else:
-            F_values.F_V += 10
+            F_values.__F_V += 10
 
 class GetZOrientation:
     def __init__(self, is_sim = False):
@@ -87,10 +87,17 @@ class GetZOrientation:
         self.last_v_estimate = 0
         self.odom_sub = rospy.Subscriber(
             "/odometry/filtered", Odometry, self.callback, queue_size=1)
-        self.camera_sub = rospy.Subscriber(
-            "/camera/color/image_raw/compressed", CompressedImage, self.image_callback, queue_size=1)
-        self.depth_image_sub = rospy.Subscriber(
-            "/camera/aligned_depth_to_color/image_raw",Image, self.callback_depth)
+        if self.is_sim:
+            self.camera_sub = rospy.Subscriber(
+                "/camera/color/image_raw/compressed", CompressedImage, self.image_callback, queue_size=1)
+            self.depth_image_sub = rospy.Subscriber(
+                "/camera/aligned_depth_to_color/image_raw",Image, self.callback_depth)
+        else:
+            self.camera_sub = rospy.Subscriber(
+                "/color_image", CompressedImage, self.image_callback, queue_size=1)
+            self.depth_image_sub = rospy.Subscriber(
+                "/depth_image",CompressedImage, self.callback_depth)
+
         self.tf_sub = rospy.Subscriber(
             "/tf", TFMessage, self.callback_tf, queue_size=1)
         self.last_image = None
@@ -112,7 +119,10 @@ class GetZOrientation:
 
     def callback_depth(self, data):
         try:
-            cv_image = self.bridge.imgmsg_to_cv2(data, "passthrough")
+            if self.is_sim:
+                cv_image = self.bridge.imgmsg_to_cv2(data, "passthrough")
+            else:
+                cv_image = self.bridge.compressed_imgmsg_to_cv2(data, "passthrough")
         except CvBridgeError as e:
             print(e)
             # check if cv_image has three dimensions
