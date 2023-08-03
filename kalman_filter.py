@@ -26,7 +26,7 @@ class KalmanFilter(object):
 
     The 8-dimensional state space
 
-        x, y, a, h, vx, vy, va, vh
+        x, y, a, h, vx, vy, va, vh, psi, vpsi
 
     contains the bounding box center position (x, y), aspect ratio a, height h,
     and their respective velocities.
@@ -34,17 +34,18 @@ class KalmanFilter(object):
     Object motion follows a constant velocity model. The bounding box location
     (x, y, a, h) is taken as direct observation of the state space (linear
     observation model).
+    psi is the angle of the robot, vpsi is the angular velocity of the robot
 
     """
 
     def __init__(self):
-        ndim, dt = 4, 1.
+        ndim, dt = 5, 1.
 
         # Create Kalman filter model matrices.
         self._motion_mat = np.eye(2 * ndim, 2 * ndim)
         for i in range(ndim):
             self._motion_mat[i, ndim + i] = dt
-        self._update_mat = np.eye(ndim, 2 * ndim)
+        self._update_mat =  np.vstack((np.eye(4, 10), np.array([0, 0, 0, 0, 0, 0, 0, 0, 1, 0])))        
 
         # Motion and observation uncertainty are chosen relative to the current
         # state estimate. These weights control the amount of uncertainty in
